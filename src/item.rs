@@ -6,7 +6,7 @@ use futures::stream::TryStreamExt;
 use mongodb::bson::doc;
 use mongodb::options::*;
 use mongodb::Database;
-use mongodb::{Collection, IndexModel};
+use mongodb::{ClientSession, Collection, IndexModel};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::error;
@@ -16,6 +16,11 @@ use std::io::{Error, ErrorKind};
 pub trait Entity {
     async fn insert(&self, db: &Database) -> Result<(), Box<dyn error::Error>>;
     async fn update(&self, db: &Database) -> Result<(), Box<dyn error::Error>>;
+    async fn update_with_session(
+        &self,
+        db: &Database,
+        session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>>;
     async fn delete(&self, db: &Database) -> Result<(), Box<dyn error::Error>>;
     async fn delete_all(&self, db: &Database) -> Result<(), Box<dyn error::Error>>;
 
@@ -54,6 +59,14 @@ pub async fn insert_item<T: Entity>(db: &Database, item: &T) -> Result<(), Box<d
 
 pub async fn update_item<T: Entity>(db: &Database, item: &T) -> Result<(), Box<dyn error::Error>> {
     item.update(db).await
+}
+
+pub async fn update_item_with_session<T: Entity>(
+    db: &Database,
+    item: &T,
+    session: &mut ClientSession,
+) -> Result<(), Box<dyn error::Error>> {
+    item.update_with_session(db, session).await
 }
 
 pub async fn delete_item<T: Entity>(db: &Database, item: &T) -> Result<(), Box<dyn error::Error>> {
@@ -396,6 +409,20 @@ impl Entity for User {
         collection.update(query, update, true).await
     }
 
+    async fn update_with_session(
+        &self,
+        db: &Database,
+        session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>> {
+        let query = doc! { "id" : self.id };
+        let update = bson::to_bson(self).unwrap();
+        let update = doc! { "$set" : update };
+        let collection = self.get_collection(db);
+        collection
+            .update_with_session(query, update, true, session)
+            .await
+    }
+
     async fn delete(&self, db: &Database) -> Result<(), Box<dyn error::Error>> {
         let query = doc! { "id" : self.id };
         let collection = self.get_collection(db);
@@ -442,6 +469,14 @@ impl Entity for SystemUser {
         collection.update(query, update, false).await
     }
 
+    async fn update_with_session(
+        &self,
+        _db: &Database,
+        _session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>> {
+        panic!("Not implemented")
+    }
+
     async fn delete(&self, _db: &Database) -> Result<(), Box<dyn error::Error>> {
         panic!("Not implemented")
     }
@@ -475,6 +510,20 @@ impl Entity for Book {
         let update = doc! { "$set" : update };
         let collection = self.get_collection(db);
         collection.update(query, update, true).await
+    }
+
+    async fn update_with_session(
+        &self,
+        db: &Database,
+        session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>> {
+        let query = doc! { "id" : self.id };
+        let update = bson::to_bson(self).unwrap();
+        let update = doc! { "$set" : update };
+        let collection = self.get_collection(db);
+        collection
+            .update_with_session(query, update, true, session)
+            .await
     }
 
     async fn delete(&self, db: &Database) -> Result<(), Box<dyn error::Error>> {
@@ -523,6 +572,14 @@ impl Entity for RentalSetting {
         collection.update(query, update, false).await
     }
 
+    async fn update_with_session(
+        &self,
+        _db: &Database,
+        _session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>> {
+        panic!("Not implemented")
+    }
+
     async fn delete(&self, _db: &Database) -> Result<(), Box<dyn error::Error>> {
         panic!("Not implemented")
     }
@@ -549,6 +606,14 @@ impl Entity for SystemSetting {
     }
 
     async fn update(&self, _db: &Database) -> Result<(), Box<dyn error::Error>> {
+        panic!("Not implemented")
+    }
+
+    async fn update_with_session(
+        &self,
+        _db: &Database,
+        _session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>> {
         panic!("Not implemented")
     }
 
@@ -583,6 +648,20 @@ impl Entity for TransactionItem {
         let update = doc! { "$set" : update };
         let collection = self.get_collection(db);
         collection.update(query, update, true).await
+    }
+
+    async fn update_with_session(
+        &self,
+        db: &Database,
+        session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>> {
+        let query = doc! { "id": self.id };
+        let update = bson::to_bson(self).unwrap();
+        let update = doc! { "$set" : update };
+        let collection = self.get_collection(db);
+        collection
+            .update_with_session(query, update, true, session)
+            .await
     }
 
     async fn delete(&self, _db: &Database) -> Result<(), Box<dyn error::Error>> {
@@ -623,6 +702,13 @@ pub trait HelperCollection<T> {
         update: Document,
         upsert: bool,
     ) -> Result<(), Box<dyn error::Error>>;
+    async fn update_with_session(
+        &self,
+        query: Document,
+        update: Document,
+        upsert: bool,
+        session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>>;
     async fn delete(&self, query: Document) -> Result<(), Box<dyn error::Error>>;
     async fn delete_all(&self) -> Result<(), Box<dyn error::Error>>;
     async fn search(&self, query: Document) -> Result<Vec<T>, Box<dyn error::Error>>;
@@ -644,6 +730,23 @@ where
             .return_document(ReturnDocument::After)
             .build();
         let _ = self.find_one_and_update(query, update, options).await?;
+        Ok(())
+    }
+
+    async fn update_with_session(
+        &self,
+        query: Document,
+        update: Document,
+        upsert: bool,
+        session: &mut ClientSession,
+    ) -> Result<(), Box<dyn error::Error>> {
+        let options = FindOneAndUpdateOptions::builder()
+            .upsert(upsert)
+            .return_document(ReturnDocument::After)
+            .build();
+        let _ = self
+            .find_one_and_update_with_session(query, update, options, session)
+            .await?;
         Ok(())
     }
 

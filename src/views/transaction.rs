@@ -2,7 +2,7 @@ use crate::item::*;
 use crate::item::{Book, User};
 use crate::views::utils::get_nowtime;
 use log::{debug, info};
-use mongodb::Database;
+use mongodb::{ClientSession, Database};
 use std::error;
 use std::sync::Mutex;
 
@@ -31,12 +31,13 @@ impl Transaction {
         items
     }
 
-    pub async fn borrow(
+    pub async fn borrow_with_session(
         db: &Database,
         counter: u32,
         user: &User,
         book: &Book,
         time_zone: &str,
+        session: &mut ClientSession,
     ) -> Result<(), Box<dyn error::Error>> {
         let dt = get_nowtime(time_zone);
         let item = TransactionItem {
@@ -48,17 +49,18 @@ impl Transaction {
             borrowed_date: format!("{}", dt.format("%Y/%m/%d %H:%M")),
             returned_date: "".to_string(),
         };
-        debug!("borrow: {:?}, counter={}", item, counter);
-        update_item(db, &item).await
+        debug!("borrow_with_session: {:?}, counter={}", item, counter);
+        update_item_with_session(db, &item, session).await
     }
 
-    pub async fn unborrow(
+    pub async fn unborrow_with_session(
         db: &Database,
         counter: u32,
         user: &User,
         book: &Book,
         borrowed_date: String,
         time_zone: &str,
+        session: &mut ClientSession,
     ) -> Result<(), Box<dyn error::Error>> {
         let dt = get_nowtime(time_zone);
         let item = TransactionItem {
@@ -70,7 +72,7 @@ impl Transaction {
             borrowed_date: borrowed_date,
             returned_date: format!("{}", dt.format("%Y/%m/%d %H:%M")),
         };
-        debug!("unborrow: {:?}, counter={}", item, counter);
-        update_item(db, &item).await
+        debug!("unborrow_with_session: {:?}, counter={}", item, counter);
+        update_item_with_session(db, &item, session).await
     }
 }

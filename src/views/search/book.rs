@@ -11,7 +11,7 @@ use crate::views::utils::fetch_book_info;
 use actix_session::Session;
 use actix_web::{web, HttpResponse, Result};
 use log::debug;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use shared_mongodb::ClientHolder;
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -27,11 +27,6 @@ pub struct FormData {
 #[derive(Deserialize, Debug)]
 pub struct Form2Data {
     pub isbn: String,
-}
-
-#[derive(Serialize, Debug)]
-pub struct BookList {
-    pub books: Vec<Book>,
 }
 
 pub async fn search_isbn(
@@ -104,7 +99,7 @@ async fn get_book_list(
         }
     };
 
-    for mut book in &mut books {
+    for book in &mut books {
         if let Some(info) = cache.get(book.id) {
             book.owner_id = Some(info.owner_id);
             book.return_deadline = Some(info.return_deadline.clone());

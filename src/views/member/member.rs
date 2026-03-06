@@ -27,13 +27,6 @@ pub struct FormData1 {
     pub member_password: String,
 }
 
-#[derive(Deserialize, Debug)]
-pub struct FormData2 {
-    pub user_id: String,
-    pub borrowed_book_id: String,
-    pub returned_book_id: String,
-}
-
 pub async fn load() -> HttpResponse {
     let html_data = read_file("src/html/member.html").unwrap();
     HttpResponse::Ok()

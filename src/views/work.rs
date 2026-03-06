@@ -2,7 +2,7 @@ use crate::error::*;
 use crate::item::atoi;
 use crate::item::RentalSetting;
 use crate::item::SystemSetting;
-use crate::item::{search_item, search_items, update_item};
+use crate::item::{search_item, search_items, update_item_with_session};
 use crate::item::{Book, BorrowedBook, User};
 use crate::views::cache::*;
 use crate::views::db_helper::get_db;
@@ -14,7 +14,7 @@ use actix_session::Session;
 use actix_web::{web, HttpResponse, Result};
 use lazy_static::lazy_static;
 use log::{debug, error, info};
-use mongodb::Database;
+use mongodb::{ClientSession, Database};
 use serde::Deserialize;
 use shared_mongodb::database::{abort_transaction, commit_transaction, start_transaction};
 use shared_mongodb::{database, ClientHolder};
@@ -86,15 +86,35 @@ pub async fn process(
 
     let mut user = User::default();
     if form.user_id == "" && form.borrowed_book_id == "" && form.returned_book_id != "" {
-        let (book_title, book_id) = unborrow_book(
+        let mut session = start_transaction(&data)
+            .await
+            .map_err(|e| BibErrorResponse::SystemError(e.to_string()))?;
+        let ret = unborrow_book(
             &db,
             &cache,
             &transaction,
             &mut user,
             &form.returned_book_id,
             &system_setting.time_zone,
+            &mut session,
         )
-        .await?;
+        .await;
+        if ret.is_err() {
+            match abort_transaction(&mut session).await {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("{}", e.to_string());
+                }
+            }
+            return Err(ret.unwrap_err());
+        }
+        match commit_transaction(&mut session).await {
+            Ok(_) => {}
+            Err(e) => {
+                return Err(BibErrorResponse::SystemError(e.to_string()));
+            }
+        }
+        let (book_title, book_id) = ret.unwrap();
         let mut reply = Reply::default();
         reply.returned_book_title = book_title;
         reply.returned_book_id = book_id;
@@ -126,10 +146,11 @@ pub async fn process(
             &system_setting.time_zone,
             setting.num_books,
             setting.num_days.into(),
+            &mut session,
         )
         .await;
         if ret.is_err() {
-            // Role back the transaction
+            // Roll back the transaction
             match abort_transaction(&mut session).await {
                 Ok(_) => {}
                 Err(e) => {
@@ -160,10 +181,11 @@ pub async fn process(
             &mut user,
             &form.returned_book_id,
             &system_setting.time_zone,
+            &mut session,
         )
         .await;
         if ret.is_err() {
-            // Role back the transaction
+            // Roll back the transaction
             match abort_transaction(&mut session).await {
                 Ok(_) => {}
                 Err(e) => {
@@ -201,6 +223,7 @@ async fn borrow_book(
     time_zone: &str,
     max_borrowing_books: u32,
     max_borrowing_days: i64,
+    session: &mut ClientSession,
 ) -> Result<(), BibErrorResponse> {
     let num_borrowed_books: u32 = user.borrowed_books.len().try_into().unwrap();
     if num_borrowed_books >= max_borrowing_books {
@@ -258,8 +281,8 @@ async fn borrow_book(
     user.borrowed_books.push(borrowed_book);
     user.borrowed_count += 1;
 
-    // Update the DB
-    update_item(db, user)
+    // Update the DB (with session for rollback support)
+    update_item_with_session(db, user, session)
         .await
         .map_err(|e| BibErrorResponse::SystemError(e.to_string()))?;
 
@@ -272,11 +295,11 @@ async fn borrow_book(
     }
 
     book.borrowed_count += 1;
-    update_item(db, &book)
+    update_item_with_session(db, &book, session)
         .await
         .map_err(|e| BibErrorResponse::SystemError(e.to_string()))?;
 
-    Transaction::borrow(db, transaction_id, user, &book, time_zone)
+    Transaction::borrow_with_session(db, transaction_id, user, &book, time_zone, session)
         .await
         .map_err(|e| BibErrorResponse::SystemError(e.to_string()))?;
 
@@ -293,6 +316,7 @@ async fn unborrow_book(
     user: &mut User,
     book_id: &str,
     time_zone: &str,
+    session: &mut ClientSession,
 ) -> Result<(String, u32), BibErrorResponse> {
     // Check the barcode size
     if book_id.starts_with("0") && book_id.len() != BOOK_BARCODE_KETA {
@@ -350,8 +374,8 @@ async fn unborrow_book(
         return Err(BibErrorResponse::BookNotBorrowed);
     }
 
-    // Update the DB
-    update_item(db, user)
+    // Update the DB (with session for rollback support)
+    update_item_with_session(db, user, session)
         .await
         .map_err(|e| BibErrorResponse::SystemError(e.to_string()))?;
 
@@ -363,9 +387,17 @@ async fn unborrow_book(
         ));
     }
 
-    Transaction::unborrow(db, transaction_id, user, &book, borrowed_date, time_zone)
-        .await
-        .map_err(|e| BibErrorResponse::SystemError(e.to_string()))?;
+    Transaction::unborrow_with_session(
+        db,
+        transaction_id,
+        user,
+        &book,
+        borrowed_date,
+        time_zone,
+        session,
+    )
+    .await
+    .map_err(|e| BibErrorResponse::SystemError(e.to_string()))?;
 
     // Update the cache
     cache.unborrow(book.id);
