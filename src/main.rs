@@ -75,8 +75,8 @@ async fn main() -> std::io::Result<()> {
         // Find the latest counter by borrowed_date (not by max ID) to handle ID rotation correctly
         let last_counter = Transaction::find_latest_counter(&db).await;
         info!(
-            "last_counter/max_num_transactions = {}/{}",
-            last_counter, max_num_transactions
+            "[{}] last_counter/max_num_transactions = {}/{}",
+            db_name, last_counter, max_num_transactions
         );
         let transaction = Transaction::new(max_num_transactions, last_counter);
         transaction_map.insert(db_name.to_string(), transaction);

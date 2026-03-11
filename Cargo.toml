@@ -7,6 +7,18 @@ edition = "2021"
 name = "app"
 path = "src/main.rs"
 
+[[bin]]
+name = "fix_transaction_ids"
+path = "src/fix_transaction_ids.rs"
+
+[[bin]]
+name = "check_transaction_ids"
+path = "src/check_transaction_ids.rs"
+
+[[bin]]
+name = "dump_transaction_ids"
+path = "src/dump_transaction_ids.rs"
+
 [dependencies]
 chrono = "0.4"
 chrono-tz = "0.4"

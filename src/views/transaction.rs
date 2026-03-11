@@ -34,31 +34,39 @@ impl Transaction {
         items
     }
 
-    /// Find the last counter by looking at the most recently borrowed transaction.
-    /// Sort by borrowed_date descending to find the latest transaction regardless of ID rotation.
+    /// Find the last counter by scanning all borrowed_books in users2.
+    /// Returns the transaction_id of the most recently borrowed book
+    /// (by borrowed_date), which represents the last assigned counter value.
     pub async fn find_latest_counter(db: &Database) -> u32 {
-        let collection = db.collection::<TransactionItem>("transactions");
-        let find_options = FindOptions::builder()
-            .sort(doc! { "borrowed_date": -1 })
-            .limit(1)
-            .build();
+        let db_name = db.name();
+        let collection = db.collection::<User>("users2");
+        let find_options = FindOptions::builder().build();
         let query = doc! { "id": { "$gt": 0 } };
+        let mut latest_id: u32 = 0;
+        let mut latest_date = String::new();
         match collection.find(query, find_options).await {
-            Ok(mut cursor) => match cursor.try_next().await {
-                Ok(Some(item)) => {
-                    info!(
-                        "find_latest_counter: id={}, borrowed_date={}",
-                        item.id, item.borrowed_date
-                    );
-                    item.id
+            Ok(mut cursor) => {
+                while let Ok(Some(user)) = cursor.try_next().await {
+                    for book in &user.borrowed_books {
+                        if book.borrowed_date > latest_date
+                            || (book.borrowed_date == latest_date
+                                && book.transaction_id > latest_id)
+                        {
+                            latest_date = book.borrowed_date.clone();
+                            latest_id = book.transaction_id;
+                        }
+                    }
                 }
-                _ => 0,
-            },
+            }
             Err(e) => {
-                info!("find_latest_counter error: {:?}", e);
-                0
+                info!("[{}] find_latest_counter error: {:?}", db_name, e);
             }
         }
+        info!(
+            "[{}] find_latest_counter: transaction_id={}, borrowed_date={}",
+            db_name, latest_id, latest_date
+        );
+        latest_id
     }
 
     pub async fn borrow_with_session(
