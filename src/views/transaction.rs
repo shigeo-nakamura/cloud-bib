@@ -1,7 +1,10 @@
 use crate::item::*;
 use crate::item::{Book, User};
 use crate::views::utils::get_nowtime;
+use futures::stream::TryStreamExt;
 use log::{debug, info};
+use mongodb::bson::doc;
+use mongodb::options::FindOptions;
 use mongodb::{ClientSession, Database};
 use std::error;
 use std::sync::Mutex;
@@ -29,6 +32,33 @@ impl Transaction {
             }
         };
         items
+    }
+
+    /// Find the last counter by looking at the most recently borrowed transaction.
+    /// Sort by borrowed_date descending to find the latest transaction regardless of ID rotation.
+    pub async fn find_latest_counter(db: &Database) -> u32 {
+        let collection = db.collection::<TransactionItem>("transactions");
+        let find_options = FindOptions::builder()
+            .sort(doc! { "borrowed_date": -1 })
+            .limit(1)
+            .build();
+        let query = doc! { "id": { "$gt": 0 } };
+        match collection.find(query, find_options).await {
+            Ok(mut cursor) => match cursor.try_next().await {
+                Ok(Some(item)) => {
+                    info!(
+                        "find_latest_counter: id={}, borrowed_date={}",
+                        item.id, item.borrowed_date
+                    );
+                    item.id
+                }
+                _ => 0,
+            },
+            Err(e) => {
+                info!("find_latest_counter error: {:?}", e);
+                0
+            }
+        }
     }
 
     pub async fn borrow_with_session(

@@ -72,13 +72,8 @@ async fn main() -> std::io::Result<()> {
         setting_map.insert(db_name.to_string(), setting);
 
         // Create a Transaction
-        let mut last_counter = 0;
-        let item = TransactionItem::default();
-        let mut transaction_items = Transaction::search(&db, &item).await;
-        if transaction_items.len() > 0 {
-            let last_transaction = transaction_items.pop();
-            last_counter = last_transaction.unwrap().id;
-        }
+        // Find the latest counter by borrowed_date (not by max ID) to handle ID rotation correctly
+        let last_counter = Transaction::find_latest_counter(&db).await;
         info!(
             "last_counter/max_num_transactions = {}/{}",
             last_counter, max_num_transactions
